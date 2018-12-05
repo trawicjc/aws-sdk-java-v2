@@ -25,9 +25,11 @@ import static software.amazon.awssdk.utils.NumericUtils.saturatedCast;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.URL;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import software.amazon.awssdk.annotations.SdkPublicApi;
 import software.amazon.awssdk.http.AbortableInputStream;
@@ -54,9 +56,11 @@ import software.amazon.awssdk.utils.IoUtils;
 public final class UrlConnectionHttpClient implements SdkHttpClient {
 
     private final AttributeMap options;
+    private final Function<URL, HttpURLConnection> connectionCreator;
 
-    private UrlConnectionHttpClient(AttributeMap options) {
+    private UrlConnectionHttpClient(AttributeMap options, Function<URL, HttpURLConnection> connectionCreator) {
         this.options = options;
+        this.connectionCreator = connectionCreator;
     }
 
     public static Builder builder() {
@@ -75,8 +79,7 @@ public final class UrlConnectionHttpClient implements SdkHttpClient {
     }
 
     private HttpURLConnection createAndConfigureConnection(HttpExecuteRequest request) {
-        HttpURLConnection connection =
-            invokeSafely(() -> (HttpURLConnection) request.httpRequest().getUri().toURL().openConnection());
+        HttpURLConnection connection = connectionCreator.apply(invokeSafely(() -> request.httpRequest().getUri().toURL()));
         request.httpRequest()
                .headers()
                .forEach((key, values) -> values.forEach(value -> connection.setRequestProperty(key, value)));
@@ -159,10 +162,18 @@ public final class UrlConnectionHttpClient implements SdkHttpClient {
          * means infinity, and is not recommended.
          */
         Builder connectionTimeout(Duration connectionTimeout);
+
+        /**
+         * A function used to create a {@link HttpURLConnection} from a {@link URL}.
+         *
+         * By default {@link URL#openConnection()} is used.
+         */
+        Builder connectionCreator(Function<URL, HttpURLConnection> connectionCreator);
     }
 
     private static final class DefaultBuilder implements Builder {
         private final AttributeMap.Builder standardOptions = AttributeMap.builder();
+        private Function<URL, HttpURLConnection> connectionCreator;
 
         private DefaultBuilder() {
         }
@@ -200,6 +211,31 @@ public final class UrlConnectionHttpClient implements SdkHttpClient {
         }
 
         /**
+         * A function used to create a {@link HttpURLConnection} from a {@link URL}.
+         *
+         * By default {@link URL#openConnection()} is used.
+         *
+         * @param connectionCreator the function to call to create the connection
+         * @return this object for method chaining
+         */
+        @Override
+        public Builder connectionCreator(Function<URL, HttpURLConnection> connectionCreator) {
+            this.connectionCreator = connectionCreator;
+            return this;
+        }
+
+        public void setConnectionCreator(Function<URL, HttpURLConnection> connectionCreator) {
+            connectionCreator(connectionCreator);
+        }
+
+        private Function<URL, HttpURLConnection> resolveConnectionCreator() {
+            if (connectionCreator == null) {
+                return (url) -> invokeSafely(() -> (HttpURLConnection) url.openConnection());
+            }
+            return connectionCreator;
+        }
+
+        /**
          * Used by the SDK to create a {@link SdkHttpClient} with service-default values if no other values have been configured
          *
          * @param serviceDefaults Service specific defaults. Keys will be one of the constants defined in
@@ -210,7 +246,8 @@ public final class UrlConnectionHttpClient implements SdkHttpClient {
         public SdkHttpClient buildWithDefaults(AttributeMap serviceDefaults) {
             return new UrlConnectionHttpClient(standardOptions.build()
                                                               .merge(serviceDefaults)
-                                                              .merge(SdkHttpConfigurationOption.GLOBAL_HTTP_DEFAULTS));
+                                                              .merge(SdkHttpConfigurationOption.GLOBAL_HTTP_DEFAULTS),
+                                               resolveConnectionCreator());
         }
     }
 }
