@@ -113,8 +113,6 @@ public class NewServiceMain {
         }
 
         public void run() throws Exception {
-            Validate.isTrue(Files.exists(mavenProjectRoot), "Project root does not exist: " + mavenProjectRoot);
-
             Path servicesRoot = mavenProjectRoot.resolve("services");
             Path templateModulePath = servicesRoot.resolve("new-service-template");
             Path newServiceModulePath = servicesRoot.resolve(serviceModuleName);
